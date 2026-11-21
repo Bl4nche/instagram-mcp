@@ -15,7 +15,7 @@ mcp = MCPServer("instagram")
 @lru_cache
 def _client() -> InstagramClient:
     s = load_settings()
-    return InstagramClient(s.access_token, s.api_version, s.user_id)
+    return InstagramClient(s.access_token, s.api_version, s.user_id, s.login)
 
 
 @lru_cache

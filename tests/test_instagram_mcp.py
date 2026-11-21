@@ -65,6 +65,52 @@ def test_single_bad_metric_raises(client):
         client.get_media_insights("p1", ["impressions"])
 
 
+def test_facebook_login_uses_graph_facebook_and_ig_id():
+    seen = []
+
+    def handler(request):
+        seen.append(request)
+        return httpx.Response(200, json=PROFILE)
+
+    client = InstagramClient(
+        "t", user_id="1784", login="facebook", http=httpx.Client(transport=httpx.MockTransport(handler))
+    )
+    client.get_profile()
+    assert seen[0].url.host == "graph.facebook.com"
+    assert seen[0].url.path.endswith("/1784")
+    assert "account_type" not in seen[0].url.params["fields"]
+
+
+def test_facebook_login_requires_numeric_user_id(monkeypatch):
+    from instagram_mcp.config import load_settings
+
+    monkeypatch.setattr("instagram_mcp.config.load_dotenv", lambda *a, **k: None)
+    monkeypatch.setenv("IG_ACCESS_TOKEN", "t")
+    monkeypatch.setenv("IG_LOGIN", "facebook")
+    monkeypatch.setenv("IG_USER_ID", "me")
+    with pytest.raises(RuntimeError, match="numeric Instagram account ID"):
+        load_settings()
+    monkeypatch.setenv("IG_USER_ID", "1784")
+    assert load_settings().login == "facebook"
+
+
+def test_env_file_sets_token_and_db_location(monkeypatch, tmp_path):
+    """As a plugin the server runs from a folder that is replaced on update:
+    settings and history must come from a stable place."""
+    from instagram_mcp.config import load_settings
+
+    env = tmp_path / ".env"
+    env.write_text("IG_ACCESS_TOKEN=abc\nIG_DB_PATH=history.db\n")
+    for var in ("IG_ACCESS_TOKEN", "IG_DB_PATH", "IG_LOGIN", "IG_USER_ID"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("IG_ENV_FILE", str(env))
+    monkeypatch.chdir(tmp_path.parent)
+
+    s = load_settings()
+    assert s.access_token == "abc"
+    assert s.db_path == tmp_path / "history.db"
+
+
 def test_engagement_rates():
     rates = engagement_rates({"reach": 200, "likes": 10, "comments": 5, "shares": 3, "saved": 2}, 1000)
     assert rates == {"er_reach_pct": 10.0, "er_followers_pct": 2.0}
