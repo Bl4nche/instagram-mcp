@@ -92,7 +92,7 @@ uv run instagram-mcp check
 
 **Claude Code plugin (server + skill)**
 
-The repo is also a Claude Code plugin: it starts the MCP server and adds the `instagram` skill, which tells Claude how to use the tools and read the numbers.
+The repo is also a Claude Code plugin: it starts the MCP server and adds the `insights-for-instagram` skill, which tells Claude how to use the tools and read the numbers.
 
 ```bash
 claude plugin marketplace add /absolute/path/to/instagram-mcp

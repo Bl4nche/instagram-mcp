@@ -1,15 +1,23 @@
 {
   "name": "instagram",
-  "displayName": "Instagram Insights",
-  "version": "0.2.0",
-  "description": "Analisi delle performance organiche Instagram (post, reel, storie, reach, pubblico) con cronologia locale: server MCP in sola lettura e skill che guida l'analisi.",
-  "author": {"name": "Bl4nche"},
+  "displayName": "Insights for Instagram",
+  "version": "0.3.0",
+  "description": "Organic Instagram analytics (posts, reels, stories, reach, audience) with a local history: a read-only MCP server plus a skill that guides the analysis. Each user connects their own account; tokens and data stay on their computer.",
+  "author": {
+    "name": "Bl4nche"
+  },
   "license": "MIT",
   "skills": "./skills",
   "mcpServers": {
     "instagram": {
       "command": "uv",
-      "args": ["run", "--quiet", "--directory", "${CLAUDE_PLUGIN_ROOT}", "instagram-mcp"]
+      "args": [
+        "run",
+        "--quiet",
+        "--directory",
+        "${CLAUDE_PLUGIN_ROOT}",
+        "instagram-mcp"
+      ]
     }
   }
 }
