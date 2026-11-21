@@ -1,12 +1,31 @@
-"""Thin client for the Instagram API with Instagram Login (graph.instagram.com)."""
+"""Thin client for the Instagram Graph API.
 
+Two ways in, same endpoints and metrics:
+- `instagram`: Instagram Login (graph.instagram.com), token from the account's own credentials.
+- `facebook`: Facebook Login (graph.facebook.com): a system user token from a business
+  portfolio (Meta's default for new apps) or a Page token. Neither expires.
+
+The token travels only in the Authorization header and never appears in URLs,
+logs or error messages.
+"""
+
+import logging
 from datetime import datetime, timedelta, timezone
 
 import httpx
 
-BASE_URL = "https://graph.instagram.com"
+# httpx logs every request URL at INFO level. The token never goes in the URL
+# (see `_get`), but keep these loggers quiet anyway so MCP logs stay clean.
+for _name in ("httpx", "httpcore"):
+    logging.getLogger(_name).setLevel(logging.WARNING)
 
-PROFILE_FIELDS = "user_id,username,name,account_type,followers_count,follows_count,media_count"
+BASE_URL = "https://graph.instagram.com"
+HOSTS = {"instagram": BASE_URL, "facebook": "https://graph.facebook.com"}
+
+PROFILE_FIELDS = {
+    "instagram": "user_id,username,name,account_type,followers_count,follows_count,media_count",
+    "facebook": "id,username,name,followers_count,follows_count,media_count",
+}
 MEDIA_FIELDS = (
     "id,caption,media_type,media_product_type,permalink,timestamp,like_count,comments_count"
 )
@@ -38,30 +57,51 @@ class InstagramClient:
         access_token: str,
         api_version: str = "v23.0",
         user_id: str = "me",
+        login: str = "instagram",
         http: httpx.Client | None = None,
     ):
+        if login not in HOSTS:
+            raise ValueError(f"login must be one of {tuple(HOSTS)}")
         self._token = access_token
         self._user = user_id
+        self._login = login
         self._http = http or httpx.Client(timeout=30)
-        self._base = f"{BASE_URL}/{api_version}"
+        self._base = f"{HOSTS[login]}/{api_version}"
+
+    def _redact(self, text: str) -> str:
+        return text.replace(self._token, "<token>") if self._token else text
 
     def _get(self, url: str, params: dict | None = None) -> dict:
+        """GET with the token in the Authorization header, never in the URL, so it
+        cannot end up in logs, tracebacks or error messages."""
         params = dict(params or {})
-        if "access_token=" not in url:
-            params["access_token"] = self._token
         if not url.startswith("http"):
             url = f"{self._base}/{url.lstrip('/')}"
+        # `paging.next` URLs from Meta embed the token: strip it, the header carries it.
+        parsed = httpx.URL(url)
+        if "access_token" in parsed.params:
+            url = str(parsed.copy_remove_param("access_token"))
         # httpx drops the URL's own query string when `params` is passed, which
         # would lose the cursor in `paging.next` URLs.
-        resp = self._http.get(url, params=params or None)
+        try:
+            resp = self._http.get(
+                url,
+                params=params or None,
+                headers={"Authorization": f"Bearer {self._token}"},
+            )
+        except httpx.HTTPError as e:
+            # `from None`: the original exception carries the request, keep it out.
+            raise InstagramAPIError(f"Network error: {type(e).__name__}") from None
         try:
             data = resp.json()
         except ValueError:
-            raise InstagramAPIError(f"Non-JSON response ({resp.status_code})", resp.status_code)
+            raise InstagramAPIError(f"Non-JSON response ({resp.status_code})", resp.status_code) from None
         if resp.status_code >= 400 or "error" in data:
             err = data.get("error", {})
             raise InstagramAPIError(
-                err.get("message", f"HTTP {resp.status_code}"), resp.status_code, err.get("code")
+                self._redact(err.get("message", f"HTTP {resp.status_code}")),
+                resp.status_code,
+                err.get("code"),
             )
         return data
 
@@ -85,7 +125,7 @@ class InstagramClient:
     # --- profile & media -------------------------------------------------
 
     def get_profile(self) -> dict:
-        return self._get(self._user, {"fields": PROFILE_FIELDS})
+        return self._get(self._user, {"fields": PROFILE_FIELDS[self._login]})
 
     def get_media(self, media_id: str) -> dict:
         return self._get(media_id, {"fields": MEDIA_FIELDS})
@@ -143,4 +183,14 @@ class InstagramClient:
 
     def refresh_token(self) -> dict:
         """Extend a long-lived token by 60 days (token must be at least 24h old)."""
-        return self._get(f"{BASE_URL}/refresh_access_token", {"grant_type": "ig_refresh_token"})
+        if self._login != "instagram":
+            raise InstagramAPIError(
+                "Only Instagram Login tokens need refreshing; Facebook Login tokens "
+                "(system user or Page tokens) do not expire."
+            )
+        # The only call that needs the token as a parameter (Meta's spec for this
+        # endpoint). httpx request logging is silenced above.
+        return self._get(
+            f"{BASE_URL}/refresh_access_token",
+            {"grant_type": "ig_refresh_token", "access_token": self._token},
+        )

@@ -1,0 +1,12 @@
+{
+  "name": "instagram-mcp",
+  "owner": {"name": "Bl4nche"},
+  "description": "Instagram Insights per Claude Code",
+  "plugins": [
+    {
+      "name": "instagram",
+      "source": "./",
+      "description": "Analisi delle performance organiche Instagram con cronologia locale (storie incluse)"
+    }
+  ]
+}
